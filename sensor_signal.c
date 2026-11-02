@@ -28,108 +28,6 @@
 #define MOTION_ENTER_FRAMES             2u
 #define MOTION_STABLE_FRAMES            4u
 
-static uint32_t sum_half(const uint8_t *frame, uint8_t left)
-{
-    uint32_t sum = 0u;
-    uint32_t row;
-    uint32_t col;
-    uint32_t begin = left ? 0u : SENSOR_HALF_COLS;
-    uint32_t end = begin + SENSOR_HALF_COLS;
-
-    for (row = 0u; row < SENSOR_ROWS; ++row) {
-        for (col = begin; col < end; ++col) {
-            sum += frame[row * SENSOR_COLS + col];
-        }
-    }
-    return sum;
-}
-
-static uint16_t max_column_sum(const uint8_t *frame, uint8_t left)
-{
-    uint32_t column_sum[SENSOR_HALF_COLS] = {0u};
-    uint32_t maximum = 0u;
-    uint32_t row;
-    uint32_t col;
-    uint32_t offset = left ? 0u : SENSOR_HALF_COLS;
-
-    for (row = 0u; row < SENSOR_ROWS; ++row) {
-        for (col = 0u; col < SENSOR_HALF_COLS; ++col) {
-            column_sum[col] += frame[row * SENSOR_COLS + offset + col];
-        }
-    }
-    for (col = 0u; col < SENSOR_HALF_COLS; ++col) {
-        if (column_sum[col] > maximum) {
-            maximum = column_sum[col];
-        }
-    }
-    return (uint16_t)maximum;
-}
-
-static uint8_t max_consecutive_active_rows(const uint8_t *frame, uint8_t left)
-{
-    uint8_t current = 0u;
-    uint8_t maximum = 0u;
-    uint32_t row;
-    uint32_t col;
-    uint32_t begin = left ? 0u : SENSOR_HALF_COLS;
-    uint32_t end = begin + SENSOR_HALF_COLS;
-
-    for (row = 0u; row < SENSOR_ROWS; ++row) {
-        uint8_t active = 0u;
-        for (col = begin; col < end; ++col) {
-            if (frame[row * SENSOR_COLS + col] != 0u) {
-                ++active;
-            }
-        }
-        if (active >= ROW_ACTIVE_MIN) {
-            ++current;
-            if (current > maximum) {
-                maximum = current;
-            }
-        } else {
-            current = 0u;
-        }
-    }
-    return maximum;
-}
-
-static uint8_t top3_row_fraction_percent(const uint8_t *frame, uint8_t left)
-{
-    uint32_t row_sum[SENSOR_ROWS];
-    uint32_t top[3] = {0u, 0u, 0u};
-    uint32_t total = 0u;
-    uint32_t row;
-    uint32_t col;
-    uint32_t begin = left ? 0u : SENSOR_HALF_COLS;
-    uint32_t end = begin + SENSOR_HALF_COLS;
-
-    for (row = 0u; row < SENSOR_ROWS; ++row) {
-        row_sum[row] = 0u;
-        for (col = begin; col < end; ++col) {
-            row_sum[row] += frame[row * SENSOR_COLS + col];
-        }
-        total += row_sum[row];
-    }
-    if (total == 0u) {
-        return 100u;
-    }
-
-    for (row = 0u; row < SENSOR_ROWS; ++row) {
-        uint32_t value = row_sum[row];
-        if (value >= top[0]) {
-            top[2] = top[1];
-            top[1] = top[0];
-            top[0] = value;
-        } else if (value >= top[1]) {
-            top[2] = top[1];
-            top[1] = value;
-        } else if (value > top[2]) {
-            top[2] = value;
-        }
-    }
-
-    return (uint8_t)(((top[0] + top[1] + top[2]) * 100u) / total);
-}
 
 static uint16_t sum_votes(const uint8_t votes[SENSOR_VOTE_WINDOW])
 {
@@ -217,13 +115,64 @@ static void extract_half_features(const uint8_t *frame,
                                   uint8_t left,
                                   SensorHalfResult *result)
 {
-    result->pressure_sum = sum_half(frame, left);
-    result->average_pressure =
-        (uint16_t)(result->pressure_sum / SENSOR_HALF_SIZE);
-    result->max_column_sum = max_column_sum(frame, left);
-    result->max_consecutive_rows = max_consecutive_active_rows(frame, left);
-    result->top3_row_fraction_percent =
-        top3_row_fraction_percent(frame, left);
+    uint32_t row_sum[SENSOR_ROWS] = {0u};
+    uint32_t total = 0u;
+    uint8_t current_active = 0u;
+    uint8_t max_active = 0u;
+    uint32_t row;
+    uint32_t col;
+    uint32_t begin = left ? 0u : SENSOR_HALF_COLS;
+    uint32_t end = begin + SENSOR_HALF_COLS;
+
+    /* 1次遍历搞定总压力、行和、连续有效行 */
+    for (row = 0u; row < SENSOR_ROWS; ++row) {
+        uint8_t active = 0u;
+        for (col = begin; col < end; ++col) {
+            uint8_t val = frame[row * SENSOR_COLS + col];
+            row_sum[row] += val;
+            if (val != 0u) {
+                ++active;
+            }
+        }
+        total += row_sum[row];
+        
+        if (active >= ROW_ACTIVE_MIN) {
+            ++current_active;
+            if (current_active > max_active) {
+                max_active = current_active;
+            }
+        } else {
+            current_active = 0u;
+        }
+    }
+
+    /* 计算 Top-3 行占比 */
+    uint32_t top[3] = {0u, 0u, 0u};
+    if (total == 0u) {
+        result->top3_row_fraction_percent = 100u;
+    } else {
+        for (row = 0u; row < SENSOR_ROWS; ++row) {
+            uint32_t value = row_sum[row];
+            if (value >= top[0]) {
+                top[2] = top[1];
+                top[1] = top[0];
+                top[0] = value;
+            } else if (value >= top[1]) {
+                top[2] = top[1];
+                top[1] = value;
+            } else if (value > top[2]) {
+                top[2] = value;
+            }
+        }
+        result->top3_row_fraction_percent = 
+            (uint8_t)(((top[0] + top[1] + top[2]) * 100u) / total);
+    }
+
+    /* 赋值结果 */
+    result->pressure_sum = total;
+    result->average_pressure = (uint16_t)(total / SENSOR_HALF_SIZE);
+    result->max_consecutive_rows = max_active;
+    /* max_column_sum 因为未在判定中使用，已被移除 */
 }
 
 void SensorProcessor_Init(SensorProcessor *processor)
