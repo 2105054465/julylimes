@@ -131,12 +131,12 @@ static uint8_t top3_row_fraction_percent(const uint8_t *frame, uint8_t left)
     return (uint8_t)(((top[0] + top[1] + top[2]) * 100u) / total);
 }
 
-static uint8_t sum_votes(const uint8_t votes[SENSOR_VOTE_WINDOW])
+static uint16_t sum_votes(const uint8_t votes[SENSOR_VOTE_WINDOW])
 {
-    uint8_t sum = 0u;
+    uint16_t sum = 0u;
     uint8_t i;
     for (i = 0u; i < SENSOR_VOTE_WINDOW; ++i) {
-        sum = (uint8_t)(sum + votes[i]);
+        sum = (uint16_t)(sum + votes[i]);
     }
     return sum;
 }
@@ -241,8 +241,8 @@ SensorStatus SensorProcessor_Process(SensorProcessor *processor,
                                      SensorResult *result)
 {
     uint32_t frame_sum;
-    uint8_t left_votes;
-    uint8_t right_votes;
+    uint16_t left_votes;
+    uint16_t right_votes;
 
     if (processor == NULL || frame == NULL || result == NULL) {
         return SENSOR_STATUS_BAD_ARGUMENT;
