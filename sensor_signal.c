@@ -202,24 +202,28 @@ SensorStatus SensorProcessor_Process(SensorProcessor *processor,
     extract_half_features(frame, 1u, &result->left);
     extract_half_features(frame, 0u, &result->right);
 
-    if (!processor->calibration_done) {
+        if (!processor->calibration_done) {
         frame_sum = result->left.pressure_sum + result->right.pressure_sum;
+        
+        /* 记录开机时是否有人，但不直接终止校准 */
         if (processor->calibration_count == 0u &&
             frame_sum > BOOT_PERSON_PRESSURE_SUM) {
-            processor->threshold_left = DETECT_MARGIN;
-            processor->threshold_right = DETECT_MARGIN;
-            processor->calibration_done = 1u;
-            return SENSOR_STATUS_CALIBRATING;
+            processor->threshold_left = 0u; /* 用 0 作为一个标记，表示开机有人 */
+            processor->threshold_right = 0u;
         }
 
         processor->calibration_sum_left += result->left.average_pressure;
         processor->calibration_sum_right += result->right.average_pressure;
         ++processor->calibration_count;
+        
         if (processor->calibration_count >= CALIBRATION_FRAMES) {
+            /* 如果开机有人，把安全余量增加到 10，否则使用默认的 4 */
+            uint16_t margin = (processor->threshold_left == 0u) ? 10u : DETECT_MARGIN;
+            
             processor->threshold_left = (uint16_t)
-                (processor->calibration_sum_left / CALIBRATION_FRAMES + DETECT_MARGIN);
+                (processor->calibration_sum_left / CALIBRATION_FRAMES + margin);
             processor->threshold_right = (uint16_t)
-                (processor->calibration_sum_right / CALIBRATION_FRAMES + DETECT_MARGIN);
+                (processor->calibration_sum_right / CALIBRATION_FRAMES + margin);
             processor->calibration_done = 1u;
         }
         return SENSOR_STATUS_CALIBRATING;
